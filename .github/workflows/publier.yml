@@ -1,0 +1,59 @@
+# Publie Wouf sur https://woufapp.fr (GitHub Pages).
+# Le code source vit dans ikeupods-del/Quentools (dossier wouf/, branche par défaut) : ce dépôt ne fait que le publier.
+# Déclenchement : à la main (Actions → « Publier Wouf » → Run workflow), à chaque push ici, et toutes les 3 heures.
+# Réglage unique : Settings → Pages → Source « GitHub Actions » ; Custom domain « woufapp.fr » ; Enforce HTTPS.
+name: Publier Wouf
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '41 */3 * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Récupérer le code de Wouf
+        uses: actions/checkout@v4
+        with:
+          repository: ikeupods-del/Quentools
+          ref: claude/infirmiere-ordonnances-upload-26nl16
+          path: src
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/wouf/package-lock.json }
+      # Rien n'est publié si un test échoue.
+      - name: Tests
+        working-directory: src/wouf
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test
+      - name: Préparer le site
+        run: |
+          mkdir -p _site
+          rsync -a --exclude billing-worker --exclude tests --exclude docs --exclude node_modules --exclude 'package*.json' --exclude '.gitignore' src/wouf/ _site/
+          echo 'woufapp.fr' > _site/CNAME
+          touch _site/.nojekyll
+          test -f _site/index.html && test -f _site/sw.js
+          echo "Version publiée : $(grep -o "version: '[^']*'" _site/config.js)"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
